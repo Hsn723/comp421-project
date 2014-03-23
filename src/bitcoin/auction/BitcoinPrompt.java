@@ -1,5 +1,7 @@
 package bitcoin.auction;
 import java.sql.*;
+import java.util.ArrayList;
+import java.util.Calendar;
 import java.util.Scanner;
 
 public class BitcoinPrompt {
@@ -52,7 +54,7 @@ public class BitcoinPrompt {
 						updateListing();
 						break;
 				}
-		} while(option != 0);
+			} while(option != 0);
 		} catch(SQLException e){
 			System.out.println("SQL error\n" + e.getMessage());
 		}
@@ -150,7 +152,123 @@ public class BitcoinPrompt {
 	 * @throws SQLException
 	 */
 	private static void createListing() throws SQLException {
-		// TODO
+		String item_title;
+		String item_desc;
+		double price;
+		int category_id = 0;
+		String status = "available";	//obviously
+		String start_time;
+		int num_days;
+		String end_time;
+		
+		System.out.println("Enter listing title:");
+		item_title = in.nextLine();
+		System.out.println("Describe your listing in one line:");
+		item_desc = in.nextLine();
+		// Choose a category
+		do {
+			category_id = getCategory();
+		} while (category_id == 0);
+		
+		System.out.println("Enter item price in BTC:");
+		price = in.nextDouble();
+		
+		System.out.println("Enter the number of days you want to list this item for:");
+		num_days = in.nextInt();
+		java.util.Calendar cal = java.util.Calendar.getInstance();
+		Timestamp timestamp = new Timestamp(cal.getTimeInMillis());
+		start_time = timestamp.toString();
+		
+		cal.setTime(timestamp);
+		cal.add(Calendar.DAY_OF_WEEK, num_days);
+		timestamp.setTime(cal.getTime().getTime());
+		end_time = timestamp.toString();
+		
+		command = "INSERT INTO Item "
+				+ "(seller_id, cat_id, title, description, price, status, start_time, end_time) "
+				+ "VALUES ("
+				+ userId + ", "
+				+ category_id + ", "
+				+ item_title + ", "
+				+ item_desc + ", "
+				+ price + ", "
+				+ status + ", "
+				+ start_time + ", "
+				+ end_time + ") RETURNING item_id;";
+		results = statement.executeQuery(command);
+		
+		int item_id;
+		ArrayList<Integer> tag_id;
+		// Tags
+		if(results.next() && results.getInt(1) > 0) {
+			item_id = results.getInt(1);
+			do {
+				tag_id = getTag();
+			} while (tag_id == null);
+			
+			StringBuffer buffer = new StringBuffer();
+			buffer.append("INSERT INTO ItemTags VALUES ");
+			for (Integer id : tag_id) {
+				buffer.append("(" + item_id + ", " + id.intValue() + "),");
+			}
+			buffer.setCharAt(buffer.lastIndexOf(","), ';');
+			command = buffer.toString();
+			results = statement.executeQuery(command);
+		}
+		else System.out.println("There was a problem adding the item");
+	}
+	
+	/**
+	 * Asks the user to select a category
+	 * @return the selected category or 0
+	 * @throws SQLException
+	 */
+	private static int getCategory() throws SQLException {
+		int max_category = 0;
+		command = "SELECT * FROM Category;";
+		results = statement.executeQuery(command);
+		System.out.println("Select an item category under which to list your item:");
+		while(results.next()) {
+			System.out.println(results.getInt("cat_id") + ") " + results.getString("cat_name"));
+		}
+		command = "SELECT max(cat_id) FROM Category;";
+		if(results.next()) {
+			max_category = results.getInt(1);
+		}
+		int entered_category = in.nextInt();
+		return entered_category <= max_category && entered_category > 0 ? entered_category : 0;
+	}
+	
+	/**
+	 * Asks the user to select a bunch of tags
+	 * @return an ArrayList of tags
+	 * @throws SQLException
+	 */
+	private static ArrayList<Integer> getTag() throws SQLException {
+		int max_tag = 0;
+		command = "SELECT max(tag_id) FROM Tag;";
+		if(results.next()) {
+			max_tag = results.getInt(1);
+		}
+		
+		boolean more_tag = false;
+		ArrayList<Integer> entered_tags = new ArrayList<Integer>();
+		command = "SELECT * FROM Tag;";
+		results = statement.executeQuery(command);
+		do {
+			System.out.println("Select a tag to associate with your listing");
+			while(results.next()) {
+				System.out.println(results.getInt("tag_id") + ") " + results.getString("tag_name"));
+			}
+			results.beforeFirst(); // reset cursor
+			Integer entered_tag = new Integer(in.nextInt());
+			if(entered_tag <= max_tag && entered_tag > 0 && !entered_tags.contains(entered_tag)) {
+				entered_tags.add(entered_tag);
+			}
+			System.out.println("Add another tag? (y/n)");
+			more_tag = in.nextLine().equals("y");
+		} while (more_tag);
+		return entered_tags;
 	}
 	
 	/**
@@ -158,7 +276,25 @@ public class BitcoinPrompt {
 	 * @throws SQLException
 	 */
 	private static void updateListing() throws SQLException {
-		// TODO
+		// get still active listings
+		command = "SELECT * FROM Item WHERE seller_id = " + userId + " && end_time < NOW();";
+		results = statement.executeQuery(command);
+		System.out.println("Here are your current listings:");
+		while(results.next()) {
+			System.out.println(results.getInt("item_id") + ") " + results.getString("title") + ": " + results.getString("description"));
+		}
+		System.out.println("Select a listing to edit:");
+		int selected_listing = in.nextInt();
+		// no error checking yolo
+		System.out.println("Type in the new listing description in one line:");
+		String new_desc = in.nextLine();
+		
+		// update description
+		results.beforeFirst();
+		while(results.next() && results.getInt("item_id") != selected_listing);
+		results.updateString("description", new_desc);
+		results.next();	//apparently can't call updateRow when the cursor is currently there so move the cursor
+		results.updateRow();
 	}
 	
 	/**
